@@ -2,6 +2,8 @@
 
 一個供 Tampermonkey 使用的 ChatGPT 路由檢查腳本。每次送出訊息後，它會比對請求模型與前端可觀察到的服務端路由標注，並用精簡面板顯示結果。
 
+友鏈：[LINUX DO](https://linux.do)
+
 ## 功能
 
 - 每輪自動擷取 `request.model` 與 `thinking_effort`
