@@ -6,16 +6,6 @@
 
 友鏈：[LINUX DO](https://linux.do)
 
-## 介面預覽
-
-### 原版介面
-
-![ChatGPT Route Checker 原版介面](docs/route-checker-v5.webp)
-
-### v6 介面
-
-![ChatGPT Route Checker v6 介面](docs/route-checker-v6.webp)
-
 ## 功能
 
 - 每輪自動擷取 `request.model` 與 `thinking_effort`
