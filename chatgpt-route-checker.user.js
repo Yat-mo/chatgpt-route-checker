@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Route Checker
 // @namespace    chatgpt-route-checker
-// @version      6.0.4
+// @version      6.0.5
 // @description  每輪自動比對 ChatGPT 請求模型與服務端路由標注，提供可收合、可拖曳的狀態面板
 // @author       Yat-mo
 // @match        https://chatgpt.com/*
@@ -15,7 +15,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "6.0.4";
+  const VERSION = "6.0.5";
   const INSTANCE_KEY = "__CHATGPT_ROUTE_CHECKER_V6__";
   const HOST_ID = "__chatgpt_route_checker_v6_host__";
 
@@ -1233,6 +1233,30 @@
     const conflicts = conflictingEvidence(state.requestModel);
     const secondaryConflicts = conflicts.filter(item => !item.primary);
 
+    if (!observed.primary) {
+      if (state.responseComplete) {
+        return {
+          key: "primary-unavailable",
+          tone: "warn",
+          icon: "warn",
+          mini: "無法確認",
+          title: "缺少主要服務端標注",
+          description: `本輪只取得${sourceLabel(observed.source)}，無法確認請求模型與服務端路由是否一致。`,
+          resolved: true
+        };
+      }
+
+      return {
+        key: "waiting-primary",
+        tone: "info",
+        icon: "checking",
+        mini: "檢測中",
+        title: "正在等待主要服務端標注",
+        description: `已取得${sourceLabel(observed.source)}，收到 server_ste_metadata.model_slug 後才會給出判定。`,
+        resolved: false
+      };
+    }
+
     if (
       requestedEffortTier !== null &&
       responseEffortTier !== null &&
@@ -1285,30 +1309,6 @@
         mini: "標注有差異",
         title: "交叉驗證發現不同標注",
         description: `主要服務端標注與請求相同，但${evidenceSummary(secondaryConflicts)}。`,
-        resolved: true
-      };
-    }
-
-    if (!observed.primary) {
-      if (requested === routed) {
-        return {
-          key: "fallback-match",
-          tone: "info",
-          icon: "route",
-          mini: "初步一致",
-          title: "頁面標注與請求一致",
-          description: `${sourceLabel(observed.source)}與請求模型相同，仍在等待主要服務端標注。`,
-          resolved: false
-        };
-      }
-
-      return {
-        key: "fallback-difference",
-        tone: "warn",
-        icon: "warn",
-        mini: "需要確認",
-        title: "路由資料不同",
-        description: `${sourceLabel(observed.source)}與請求模型不同，但主要服務端標注尚未取得。`,
         resolved: true
       };
     }
@@ -1474,18 +1474,23 @@
   function crossCheckLabel() {
     const evidence = modelEvidence();
     const conflicts = conflictingEvidence();
+    const hasPrimaryEvidence = evidence.some(item => item.primary);
 
     if (!state.requestModel || !evidence.length) {
       return null;
+    }
+
+    if (!hasPrimaryEvidence) {
+      return state.responseComplete
+        ? "缺少主要服務端標注，無法確認"
+        : "等待主要服務端標注";
     }
 
     if (conflicts.length) {
       return `衝突：${evidenceSummary(conflicts)}`;
     }
 
-    return evidence.some(item => item.primary)
-      ? "目前所有標注一致"
-      : "現有標注一致，等待主要服務端標注";
+    return "目前所有標注一致";
   }
 
   function detectionLatency() {
@@ -1974,6 +1979,7 @@
     const observed = observedModel();
     const evidence = modelEvidence();
     const conflicts = conflictingEvidence();
+    const confirmed = evidence.some(item => item.primary);
 
     return {
       checkerVersion: VERSION,
@@ -2000,7 +2006,8 @@
         domModel: state.domModel
       },
       crossCheck: {
-        passed: evidence.length > 0 && conflicts.length === 0,
+        confirmed,
+        passed: confirmed ? conflicts.length === 0 : null,
         evidence: evidence.map(item => ({
           field: item.field,
           model: item.model,
