@@ -1,8 +1,20 @@
 # ChatGPT Route Checker
 
-一個供 Tampermonkey 使用的 ChatGPT 路由檢查腳本。每次送出訊息後，它會比對請求模型與前端可觀察到的服務端路由標注，並用精簡面板顯示結果。
+腳本會自動讀取 ChatGPT 當前這輪對話請求中的模型相關欄位，並把關鍵結果顯示在頁面右下角。
+
+主要比對客戶端請求的 `request.model` 與服務端回傳的 `server_ste_metadata.model_slug`，同時顯示 `assistant metadata.model_slug`、`resolved_model_slug`、`requested_model_experience` 與 DOM 中的 `data-message-model-slug`，方便交叉驗證。
 
 友鏈：[LINUX DO](https://linux.do)
+
+## 介面預覽
+
+### 原版介面
+
+![ChatGPT Route Checker 原版介面](docs/route-checker-v5.webp)
+
+### v6 介面
+
+![ChatGPT Route Checker v6 介面](docs/route-checker-v6.webp)
 
 ## 功能
 
@@ -14,6 +26,7 @@
 - 可複製完整技術資料，方便排查缺失欄位
 - 支援 ChatGPT 深色與淺色介面
 - 記住最小化與嚴格模式設定
+- 取得主要服務端標注前只顯示檢測中，不會先判定一致
 
 ## 安裝
 
