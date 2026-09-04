@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Route Checker
 // @namespace    chatgpt-route-checker
-// @version      6.0.5
+// @version      6.0.6
 // @description  每輪自動比對 ChatGPT 請求模型與服務端路由標注，提供可收合、可拖曳的狀態面板
 // @author       Yat-mo
 // @match        https://chatgpt.com/*
@@ -15,7 +15,8 @@
 (() => {
   "use strict";
 
-  const VERSION = "6.0.5";
+  const VERSION = "6.0.6";
+  const POST_RESPONSE_CONFIRMATION_MS = 15000;
   const INSTANCE_KEY = "__CHATGPT_ROUTE_CHECKER_V6__";
   const HOST_ID = "__chatgpt_route_checker_v6_host__";
 
@@ -134,6 +135,7 @@
     updatedAt: null,
     firstEvidenceAt: null,
     responseComplete: false,
+    confirmationComplete: false,
     domBaselineNode: null,
     telemetrySeen: 0,
     telemetryScanned: 0,
@@ -1218,9 +1220,13 @@
         key: "waiting-server",
         tone: "info",
         icon: "checking",
-        mini: "檢測中",
-        title: "正在等待路由標注",
-        description: "請求模型已取得，等待服務端回傳本輪模型資料。",
+        mini: state.responseComplete ? "正在確認" : "檢測中",
+        title: state.responseComplete
+          ? "正在確認路由標注"
+          : "正在等待路由標注",
+        description: state.responseComplete
+          ? "正文回覆已結束，仍在等待稍後送達的路由遙測標注。"
+          : "請求模型已取得，等待服務端回傳本輪模型資料。",
         resolved: false
       };
     }
@@ -1234,24 +1240,12 @@
     const secondaryConflicts = conflicts.filter(item => !item.primary);
 
     if (!observed.primary) {
-      if (state.responseComplete) {
-        return {
-          key: "primary-unavailable",
-          tone: "warn",
-          icon: "warn",
-          mini: "無法確認",
-          title: "缺少主要服務端標注",
-          description: `本輪只取得${sourceLabel(observed.source)}，無法確認請求模型與服務端路由是否一致。`,
-          resolved: true
-        };
-      }
-
       return {
         key: "waiting-primary",
         tone: "info",
         icon: "checking",
-        mini: "檢測中",
-        title: "正在等待主要服務端標注",
+        mini: "正在確認",
+        title: "正在確認路由標注",
         description: `已取得${sourceLabel(observed.source)}，收到 server_ste_metadata.model_slug 後才會給出判定。`,
         resolved: false
       };
@@ -1457,9 +1451,11 @@
 
   function fieldRow(key, value) {
     const hasValue = value !== null && value !== undefined && value !== "";
-    const missingLabel = state.responseComplete
-      ? "本輪未提供"
-      : "等待回傳";
+    const missingLabel = !state.active
+      ? "等待訊息"
+      : state.confirmationComplete
+        ? "本輪未提供"
+        : "正在確認";
 
     return `
       <div class="data-row">
@@ -1481,9 +1477,7 @@
     }
 
     if (!hasPrimaryEvidence) {
-      return state.responseComplete
-        ? "缺少主要服務端標注，無法確認"
-        : "等待主要服務端標注";
+      return "正在確認主要服務端標注";
     }
 
     if (conflicts.length) {
@@ -1709,7 +1703,14 @@
                     ${fieldRow("DOM data-message-model-slug", state.domModel)}
                     ${fieldRow("判定來源", observedSource)}
                     ${fieldRow("首個路由資料耗時", detectionLatency())}
-                    ${fieldRow("回覆擷取狀態", state.responseComplete ? "已結束" : "接收中")}
+                    ${fieldRow(
+                      "回覆擷取狀態",
+                      state.responseComplete
+                        ? state.confirmationComplete
+                          ? "確認完成"
+                          : "正在確認"
+                        : "接收中"
+                    )}
                     ${fieldRow("遙測封包", `${state.telemetryScanned}/${state.telemetrySeen}`)}
                     ${fieldRow("交叉驗證", crossCheckLabel())}
                   </div>
@@ -1844,6 +1845,7 @@
 
   let drag = null;
   let toastTimer = null;
+  let confirmationTimer = null;
   let suppressNextClick = false;
   let renderAfterDrag = false;
 
@@ -2024,13 +2026,14 @@
       },
       capture: {
         responseComplete: state.responseComplete,
+        confirmationComplete: state.confirmationComplete,
         telemetrySeen: state.telemetrySeen,
         telemetryScanned: state.telemetryScanned,
         firstEvidenceAfterMs:
           state.startedAt && state.firstEvidenceAt
             ? Math.max(0, state.firstEvidenceAt - state.startedAt)
             : null,
-        unavailableFields: state.responseComplete
+        unavailableFields: state.confirmationComplete
           ? [
               ["serverModel", state.serverModel],
               ["assistantModel", state.assistantModel],
@@ -2105,8 +2108,25 @@
     if (!contextIsCurrent(context) || state.responseComplete) return;
 
     state.responseComplete = true;
+    state.confirmationComplete = false;
     state.updatedAt = Date.now();
     scheduleRender();
+
+    const generationId = context.generationId || state.generationId;
+
+    if (confirmationTimer) {
+      window.clearTimeout(confirmationTimer);
+    }
+
+    confirmationTimer = window.setTimeout(() => {
+      confirmationTimer = null;
+
+      if (generationId !== state.generationId) return;
+
+      state.confirmationComplete = true;
+      state.updatedAt = Date.now();
+      scheduleRender();
+    }, POST_RESPONSE_CONFIRMATION_MS);
   }
 
   function latestAssistantCandidate() {
@@ -2211,6 +2231,11 @@
   function resetTurn(request, turnKey) {
     const baseline = latestAssistantCandidate();
 
+    if (confirmationTimer) {
+      window.clearTimeout(confirmationTimer);
+      confirmationTimer = null;
+    }
+
     state.active = true;
     state.generationId += 1;
     state.turnKey = turnKey || `turn-${Date.now()}`;
@@ -2232,6 +2257,7 @@
     state.updatedAt = null;
     state.firstEvidenceAt = null;
     state.responseComplete = false;
+    state.confirmationComplete = false;
     state.telemetrySeen = 0;
     state.telemetryScanned = 0;
     state.domBaselineNode = baseline?.node || null;
@@ -2335,10 +2361,6 @@
         markEvidence();
       } else {
         state.updatedAt = Date.now();
-      }
-
-      if (context.source === "telemetry") {
-        state.responseComplete = true;
       }
 
       scheduleRender();
